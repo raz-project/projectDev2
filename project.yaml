@@ -1,0 +1,68 @@
+---
+- name: Install Docker and common packages
+  hosts: targets
+  become: yes
+
+  vars:
+    my_package: docker.io  # Docker package name
+    common_packages:
+      - curl
+      - git
+      - htop
+      - docker-compose  # Ensure docker-compose is included
+
+  handlers:
+    - name: restart docker
+      ansible.builtin.service:
+        name: docker
+        state: restarted
+
+  tasks:
+    - name: Install commonly used packages
+      apt:
+        name: "{{ item }}"
+        state: present
+        update_cache: yes
+      loop: "{{ common_packages }}"
+
+    - name: Install Docker package
+      apt:
+        name: "{{ my_package }}"
+        state: present
+        update_cache: yes
+
+    - name: Ensure Docker service is running
+      service:
+        name: docker
+        state: started
+        enabled: yes
+
+    - name: Run NGINX container
+      community.docker.docker_container:
+        name: nginx_container
+        image: nginx:latest
+        state: started
+        ports:
+          - "80:80"
+
+    - name: Check if NGINX is serving index.html
+      ansible.builtin.uri:
+        url: http://localhost/index.html
+        return_content: yes
+      register: nginx_response
+
+    - name: Show NGINX response
+      ansible.builtin.debug:
+        var: nginx_response.content
+
+   # - name: Stop nginx_container if running
+   #   community.docker.docker_container:
+    #    name: nginx_container
+    #    state: stopped
+     # ignore_errors: yes
+
+   # - name: Remove nginx_container if exists
+    #  community.docker.docker_container:
+      #  name: nginx_container
+      #  state: absent
+  #    ignore_errors: yes
