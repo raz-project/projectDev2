@@ -25,9 +25,9 @@ pipeline {
         stage('Run Ansible Playbook') {
             steps {
                 sh '''
-                    ansible-playbook -i inventory.ini project.yaml
-                '''
-            }
+                    ansible-playbook -i inventory.ini project.yaml --private-key=/var/lib/jenkins/.ssh/id_rsa -u worker
+                 '''
+            }  
         }
     }
 }
