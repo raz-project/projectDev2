@@ -12,16 +12,6 @@ pipeline {
             }
         }
 
-        stage('Install Ansible Dependencies') {
-            steps {
-                sh '''
-                    sudo apt update
-                    sudo apt install -y ansible python3-pip python3-docker
-                    ansible-galaxy collection install community.docker
-                '''
-            }
-        }
-
         stage('Run Ansible Playbook') {
             steps {
                 sh '''
