@@ -16,8 +16,7 @@ pipeline {
             steps {
                 sh '''
                     sudo apt update
-                    sudo apt install -y ansible python3-pip
-                    pip3 install docker
+                    sudo apt install -y ansible python3-pip python3-docker
                     ansible-galaxy collection install community.docker
                 '''
             }
