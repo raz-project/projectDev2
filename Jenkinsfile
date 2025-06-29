@@ -1,10 +1,5 @@
 pipeline {
     agent any
-
-    environment {
-        ANSIBLE_HOST_KEY_CHECKING = 'False' // disable host key checking
-    }
-
     stages {
         stage('Checkout Code') {
             steps {
