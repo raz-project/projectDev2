@@ -1,0 +1,6 @@
+users:
+{% for user in user_list %}
+  - name: {{ user.name }}
+    shell: {{ user.shell }}
+    state: {{ user.state }}
+{% endfor %}

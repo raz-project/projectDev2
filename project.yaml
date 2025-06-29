@@ -1,15 +1,26 @@
----
-- name: Install Docker and common packages
+- name: Install Docker and run NGINX via Docker Compose
   hosts: targets
   become: yes
 
   vars:
-    my_package: docker.io  # Docker package name
+    user_list:
+      - name: raz
+        shell: /bin/bash
+        state: present
+      - name: dev
+        shell: /bin/bash
+        state: present
+
+    docker_packages:
+      - docker-ce
+      - docker-ce-cli
+      - containerd.io
+      - docker-compose-plugin
+
     common_packages:
       - curl
       - git
       - htop
-      - docker-compose  # Ensure docker-compose is included
 
   handlers:
     - name: restart docker
@@ -18,18 +29,108 @@
         state: restarted
 
   tasks:
-    - name: Install commonly used packages
+    ########## FIREWALL CONFIGURATION ##########
+    - name: Ensure UFW is installed
+      apt:
+        name: ufw
+        state: present
+        update_cache: yes
+
+    - name: Allow SSH
+      community.general.ufw:
+        rule: allow
+        name: OpenSSH
+
+    - name: Allow HTTP (port 80)
+      community.general.ufw:
+        rule: allow
+        port: 80
+        proto: tcp
+
+    - name: Allow HTTP alternate port for NGINX (port 8081)
+      community.general.ufw:
+        rule: allow
+        port: 8081
+        proto: tcp
+
+    - name: Enable UFW and set default rules
+      community.general.ufw:
+        state: enabled
+        policy: deny
+
+
+    ########## USER CREATION ##########
+    - name: Render user list from template to remote
+      template:
+        src: users.yaml.j2
+        dest: /tmp/users.yaml
+        mode: '0644'
+
+    - name: Read rendered user file from remote
+      slurp:
+        src: /tmp/users.yaml
+      register: slurped_users
+
+    - name: Load user data as variables
+      set_fact:
+        rendered_users: "{{ slurped_users.content | b64decode | from_yaml }}"
+
+    - name: Ensure users are present
+      ansible.builtin.user:
+        name: "{{ item.name }}"
+        shell: "{{ item.shell }}"
+        state: "{{ item.state }}"
+      loop: "{{ rendered_users.users }}"
+
+    ########## INSTALLATION TASKS ##########
+    - name: Wait for APT lock to be released
+      shell: |
+        while fuser /var/lib/dpkg/lock >/dev/null 2>&1 || \
+              fuser /var/lib/apt/lists/lock >/dev/null 2>&1 || \
+              fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1; do
+          echo "Waiting for apt lock..."
+          sleep 10
+        done
+      changed_when: false
+
+    - name: Install prerequisites
+      apt:
+        name:
+          - apt-transport-https
+          - ca-certificates
+          - curl
+          - gnupg
+          - lsb-release
+        state: present
+        update_cache: yes
+
+    - name: Add Docker GPG key
+      ansible.builtin.apt_key:
+        url: https://download.docker.com/linux/ubuntu/gpg
+        state: present
+
+    - name: Add Docker APT repository
+      ansible.builtin.apt_repository:
+        repo: "deb [arch=amd64] https://download.docker.com/linux/ubuntu {{ ansible_distribution_release }} stable"
+        state: present
+        filename: docker
+        update_cache: yes
+
+    - name: Install Docker and Compose plugin
+      apt:
+        name: "{{ docker_packages }}"
+        state: present
+        update_cache: yes
+      retries: 5
+      delay: 15
+      register: docker_install
+      until: docker_install is success
+
+    - name: Install common packages
       apt:
         name: "{{ item }}"
         state: present
-        update_cache: yes
       loop: "{{ common_packages }}"
-
-    - name: Install Docker package
-      apt:
-        name: "{{ my_package }}"
-        state: present
-        update_cache: yes
 
     - name: Ensure Docker service is running
       service:
@@ -37,32 +138,105 @@
         state: started
         enabled: yes
 
-    - name: Run NGINX container
+    ########## ONE-OFF CONTAINER ##########
+    - name: Copy custom index.html to remote host
+      ansible.builtin.copy:
+        src: ./web/index.html
+        dest: /home/{{ ansible_user }}/index.html
+        mode: '0644'
+
+    - name: Run NGINX container with custom index.html
       community.docker.docker_container:
         name: nginx_container
         image: nginx:latest
         state: started
         ports:
-          - "80:80"
+          - "8081:80"
+        volumes:
+          - /home/{{ ansible_user }}/index.html:/usr/share/nginx/html/index.html:ro
 
-    - name: Check if NGINX is serving index.html
+    - name: Wait for NGINX to become available
       ansible.builtin.uri:
-        url: http://localhost/index.html
+        url: http://localhost:8081/index.html
+        status_code: 200
         return_content: yes
-      register: nginx_response
+      register: nginx_healthcheck
+      retries: 5
+      delay: 5
+      until: nginx_healthcheck.status == 200
 
     - name: Show NGINX response
       ansible.builtin.debug:
-        var: nginx_response.content
+        var: nginx_healthcheck.content
 
-   # - name: Stop nginx_container if running
-   #   community.docker.docker_container:
-    #    name: nginx_container
-    #    state: stopped
-     # ignore_errors: yes
+    - name: Stop and remove nginx_container
+      community.docker.docker_container:
+        name: nginx_container
+        state: absent
+      ignore_errors: yes
 
-   # - name: Remove nginx_container if exists
-    #  community.docker.docker_container:
-      #  name: nginx_container
-      #  state: absent
-  #    ignore_errors: yes
+    - name: Delete copied index.html from remote
+      ansible.builtin.file:
+        path: /home/{{ ansible_user }}/index.html
+        state: absent
+      ignore_errors: yes
+
+    ########## DOCKER COMPOSE ##########
+    - name: Create web folder on remote
+      ansible.builtin.file:
+        path: /home/{{ ansible_user }}/web
+        state: directory
+        mode: '0755'
+
+    - name: Copy index.html for docker-compose
+      ansible.builtin.copy:
+        src: ./web/index.html
+        dest: /home/{{ ansible_user }}/web/index.html
+        mode: '0644'
+
+    - name: Copy docker-compose.yaml to remote host
+      ansible.builtin.copy:
+        src: ./docker-compose.yaml
+        dest: /home/{{ ansible_user }}/docker-compose.yaml
+        mode: '0644'
+
+    - name: Run docker compose up using plugin
+      ansible.builtin.shell: |
+        docker compose -f /home/{{ ansible_user }}/docker-compose.yaml up -d
+      args:
+        chdir: /home/{{ ansible_user }}
+      register: compose_up_result
+      changed_when: "'Creating' in compose_up_result.stdout or 'Starting' in compose_up_result.stdout"
+
+    - name: Wait for service from docker compose to become available
+      ansible.builtin.uri:
+        url: http://localhost:8081/index.html
+        status_code: 200
+        return_content: yes
+      register: compose_healthcheck
+      retries: 5
+      delay: 5
+      until: compose_healthcheck.status == 200
+
+    - name: Show docker-compose NGINX response
+      ansible.builtin.debug:
+        var: compose_healthcheck.content
+
+    - name: Tear down docker-compose stack
+      ansible.builtin.shell: |
+        docker compose -f /home/{{ ansible_user }}/docker-compose.yaml down
+      args:
+        chdir: /home/{{ ansible_user }}
+      ignore_errors: yes
+
+    - name: Delete docker-compose.yaml from remote
+      ansible.builtin.file:
+        path: /home/{{ ansible_user }}/docker-compose.yaml
+        state: absent
+      ignore_errors: yes
+
+    - name: Delete web folder from remote
+      ansible.builtin.file:
+        path: /home/{{ ansible_user }}/web
+        state: absent
+      ignore_errors: yes
