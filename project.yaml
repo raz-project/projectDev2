@@ -1,8 +1,10 @@
+# Playbook to install Docker, configure firewall, create users, and deploy a static web app via Docker Compose
 - name: Install Docker and run NGINX via Docker Compose
   hosts: targets
   become: yes
 
   vars:
+    # List of users to create
     user_list:
       - name: raz
         shell: /bin/bash
@@ -11,18 +13,21 @@
         shell: /bin/bash
         state: present
 
+    # Docker-related packages to install
     docker_packages:
       - docker-ce
       - docker-ce-cli
       - containerd.io
       - docker-compose-plugin
 
+    # Other useful common packages
     common_packages:
       - curl
       - git
       - htop
 
   handlers:
+    # Handler to restart Docker if needed
     - name: restart docker
       ansible.builtin.service:
         name: docker
@@ -58,13 +63,12 @@
         state: enabled
         policy: deny
 
-
     ########## USER CREATION ##########
     - name: Render user list from template to remote
       template:
         src: users.yaml.j2
         dest: /tmp/users.yaml
-        mode: '0644'
+        mode: "0644"
 
     - name: Read rendered user file from remote
       slurp:
@@ -143,7 +147,7 @@
       ansible.builtin.copy:
         src: ./web/index.html
         dest: /home/{{ ansible_user }}/index.html
-        mode: '0644'
+        mode: "0644"
 
     - name: Run NGINX container with custom index.html
       community.docker.docker_container:
@@ -186,19 +190,19 @@
       ansible.builtin.file:
         path: /home/{{ ansible_user }}/web
         state: directory
-        mode: '0755'
+        mode: "0755"
 
     - name: Copy index.html for docker-compose
       ansible.builtin.copy:
         src: ./web/index.html
         dest: /home/{{ ansible_user }}/web/index.html
-        mode: '0644'
+        mode: "0644"
 
     - name: Copy docker-compose.yaml to remote host
       ansible.builtin.copy:
         src: ./docker-compose.yaml
         dest: /home/{{ ansible_user }}/docker-compose.yaml
-        mode: '0644'
+        mode: "0644"
 
     - name: Run docker compose up using plugin
       ansible.builtin.shell: |

@@ -1,10 +1,11 @@
-version: '3.8'
+version: '3.8'  # Docker Compose file format version
 
 services:
-  web:
-    image: nginx:latest
-    container_name: my_nginx
+  web:  # Service name (can be anything, used to reference this container)
+    image: nginx:latest  # Use the latest official NGINX image from Docker Hub
+    container_name: my_nginx  # Assign a custom name to the container
     ports:
-      - "8081:80"
+      - "8081:80"  # Map port 8081 on the host to port 80 in the container (HTTP)
     volumes:
-      - ./web/index.html:/usr/share/nginx/html/index.html
+      - ./web/index.html:/usr/share/nginx/html/index.html  # Mount custom index.html from host into container's web root (read-only by default)
+

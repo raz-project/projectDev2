@@ -1,6 +1,6 @@
-users:
-{% for user in user_list %}
-  - name: {{ user.name }}
-    shell: {{ user.shell }}
-    state: {{ user.state }}
-{% endfor %}
+# Root key in the rendered YAML
+{% for user in user_list %}  # Loop over each user dictionary in the 'user_list' variable
+  - name: {{ user.name }}  # Insert user's name
+    shell: {{ user.shell }}  # Insert user's shell (e.g., /bin/bash)
+    state: {{ user.state }}  # Insert user's desired state (e.g., present or absent)
+{% endfor %}  # End of the loop
